@@ -156,6 +156,13 @@ export function MemoryVisualization({
       const rank = getLRURank(frameIndex);
       if (rank === null) return "";
       return `Usage rank: ${rank} of ${step.orderOfUse.length} (lower = less recently used)`;
+    } else if (algorithm === "arb" && step.framesAfter[frameIndex] !== -1) {
+      // For ARB, show the reference bit value information
+      const bitValue =
+        step.refBitsAfter?.[frameIndex] === 1
+          ? "1 (recently used)"
+          : "0 (not recently used)";
+      return `MSB (Most Significant Bit): ${bitValue}`;
     }
     return "";
   };
@@ -377,34 +384,40 @@ export function MemoryVisualization({
       {algorithm === "arb" && (
         <div className="mb-4 p-4 bg-blue-50 rounded-md border border-blue-200">
           <h4 className="font-medium text-blue-800 mb-2">
-            Additional Reference Bit (ARB) / Clock Algorithm Explanation
+            Additional Reference Bits (ARB) Algorithm Explanation
           </h4>
           <p className="text-sm text-blue-700 mb-2">
-            This implementation of ARB uses a circular pointer (similar to the
-            "Clock" algorithm):
+            The ARB algorithm (also known as Aging) uses multiple reference bits
+            to track page usage history over time:
           </p>
           <ul className="list-disc list-inside text-sm text-blue-700 mb-2">
-            <li>Reference bit 1 = page was recently accessed</li>
-            <li>Reference bit 0 = page has not been recently accessed</li>
             <li>
-              The circular pointer{" "}
-              <ArrowRightCircle className="h-4 w-4 inline text-[#ff9800]" />{" "}
-              tracks the next frame to consider for replacement
+              Each page has an 8-bit history register that records access
+              patterns
+            </li>
+            <li>When a page is accessed, its highest bit (MSB) is set to 1</li>
+            <li>
+              On every reference, all history registers are shifted right by one
+              bit
             </li>
             <li>
-              On a page fault, the algorithm looks for the first frame with
-              reference bit = 0
+              This creates a history of page usage where more significant bits
+              represent more recent accesses
             </li>
             <li>
-              If no frame has a 0 bit, all bits are reset to 0 and the search
-              starts again
+              On a page fault, the page with the lowest history value (binary)
+              is replaced
             </li>
-            <li>This gives pages a "second chance" before being replaced</li>
+            <li>
+              The displayed reference bit (0 or 1) shows the most significant
+              bit (MSB) of this history register
+            </li>
           </ul>
           <div className="flex items-center text-xs text-blue-700 bg-blue-100 p-2 rounded">
             <RefreshCcw className="h-4 w-4 mr-1 text-amber-700" />
-            Watch for the reference bit reset animation when all frames have
-            reference bit = 1
+            Watch for the bit shift animation that occurs on each reference -
+            this is when history bits are moved right and new access information
+            becomes the most significant bit
           </div>
         </div>
       )}
@@ -453,8 +466,10 @@ export function MemoryVisualization({
         </div>
         {algorithm === "arb" && (
           <div className="flex items-center text-xs text-[#757575]">
-            <ArrowRightCircle className="h-4 w-4 mr-1 text-[#ff9800]" />
-            Replacement pointer
+            <div className="w-4 h-4 rounded-full bg-[#4caf50] text-white mr-1 flex items-center justify-center text-[10px]">
+              1
+            </div>
+            Reference bit (MSB from 8-bit history register)
           </div>
         )}
         {algorithm === "lru" && (

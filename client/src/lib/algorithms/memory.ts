@@ -94,17 +94,26 @@ export function simulateLRU(
   return result;
 }
 
-// ARB (Additional Reference Bit) Algorithm with Circular Queue implementation
-// This is also known as the "Clock" or "Second Chance" algorithm
+// ARB (Additional Reference Bit) Algorithm implementation
+// This algorithm uses a history of reference bits to make replacement decisions
 export function simulateARB(
   frameCount: number,
   refString: number[]
 ): MemoryResult {
   const frames: number[] = new Array(frameCount).fill(-1);
+  // For each frame, store 8-bit reference history
+  // Higher values mean more recently/frequently used pages
+  const refBitHistory: number[] = new Array(frameCount).fill(0);
+  // We'll use a single bit for visualization purposes
   const refBits: number[] = new Array(frameCount).fill(0);
-  let pointer = 0; // Circular pointer (clock hand) to track replacement position
-  let framesFilled = 0; // Track how many frames have been filled
+  let framesFilled = 0;
 
+  // We'll keep a pointer for visualization compatibility with the UI
+  // In real ARB, there's no pointer as it's not a clock algorithm
+  // but we need this for the visualization
+  let pointer = 0;
+
+  // In true aging algorithm, we shift bits on every reference
   const result: MemoryResult = {
     steps: [],
     faults: 0,
@@ -113,6 +122,9 @@ export function simulateARB(
 
   for (let i = 0; i < refString.length; i++) {
     const page = refString[i];
+    // In true Aging algorithm, we shift on every reference
+    const shouldShiftBits = i > 0; // Shift on every reference except the first one
+
     const step: MemoryStep = {
       reference: page,
       frames: [...frames],
@@ -120,17 +132,36 @@ export function simulateARB(
       framesAfter: [],
       refBitsAfter: [],
       isFault: false,
+      resetBits: shouldShiftBits,
       pointerPosition: pointer,
-      pointerPositionAfter: pointer, // Will be updated later if pointer moves
-      resetBits: false,
+      pointerPositionAfter: pointer, // Will be updated if needed
     };
+
+    // Perform the shift operation on every reference (except the first)
+    if (shouldShiftBits) {
+      for (let j = 0; j < frameCount; j++) {
+        if (frames[j] !== -1) {
+          // Right shift the history (divide by 2)
+          refBitHistory[j] = refBitHistory[j] >> 1;
+
+          // Update the single display bit for visualization
+          // For true Aging algorithm, we display the MSB (Most Significant Bit)
+          refBits[j] = (refBitHistory[j] & 0x80) > 0 ? 1 : 0; // Get highest bit (bit 7)
+        }
+      }
+    }
 
     // Check if page already in frames
     const frameIndex = frames.indexOf(page);
     if (frameIndex !== -1) {
-      // Page hit - set reference bit to 1
+      // Page hit - set the highest bit
       result.hits++;
-      refBits[frameIndex] = 1;
+
+      // Set the highest bit (bit 7) for this page's history
+      refBitHistory[frameIndex] = refBitHistory[frameIndex] | 0x80; // OR with 10000000
+
+      // Set the display bit to show the MSB for visualization
+      refBits[frameIndex] = 1; // MSB is now set to 1
     } else {
       // Page fault
       result.faults++;
@@ -140,65 +171,37 @@ export function simulateARB(
         // Empty frame available - place in the next available slot
         const emptyIndex = frames.indexOf(-1);
         frames[emptyIndex] = page;
-        refBits[emptyIndex] = 1; // Set reference bit for newly loaded page
+
+        // Set highest bit for new page (according to canonical Aging algorithm)
+        refBitHistory[emptyIndex] = 0x80; // 10000000 in binary
+        refBits[emptyIndex] = 1; // MSB = 1
+
         step.replacedFrame = emptyIndex;
         framesFilled++;
 
-        // In some ARB implementations, the clock hand doesn't move when filling empty frames
-        // But for clarity in visualization, we'll advance it to the next position
+        // Update pointer for visualization
         pointer = (emptyIndex + 1) % frameCount;
         step.pointerPositionAfter = pointer;
       } else {
-        // All frames are filled - use the clock algorithm to find a victim page
-        let foundVictim = false;
-        let loopCount = 0; // Track if we've gone all the way around
-        const startPointer = pointer; // Remember where we started
+        // All frames are filled - find the one with the lowest reference history
+        let minValue = Number.MAX_SAFE_INTEGER;
+        let victimIndex = 0;
 
-        // Keep going around the "clock" until we find a victim page
-        while (!foundVictim) {
-          // If reference bit is 0, replace this page
-          if (refBits[pointer] === 0) {
-            step.replacedFrame = pointer;
-            frames[pointer] = page;
-            refBits[pointer] = 1; // Set bit for the new page
-            foundVictim = true;
-
-            // Advance pointer for next iteration
-            pointer = (pointer + 1) % frameCount;
-          } else {
-            // Give a second chance: clear ref bit but don't replace yet
-            refBits[pointer] = 0;
-
-            // Move clock hand (pointer) forward
-            pointer = (pointer + 1) % frameCount;
-
-            // Check if we've completed a full revolution
-            if (pointer === startPointer) {
-              loopCount++;
-
-              // If we've gone around once and haven't found a victim,
-              // all bits are now 0 (we've reset them all)
-              if (loopCount === 1) {
-                step.resetBits = true;
-
-                // In a true implementation, we'd continue looking for a victim
-                // (which would now be the next frame since all bits are 0)
-                // But we won't immediately replace to show the reset bits visualization
-              }
-
-              // If we've gone around twice, something's wrong (shouldn't happen)
-              // Force a replacement to prevent infinite loop
-              if (loopCount > 1) {
-                step.replacedFrame = pointer;
-                frames[pointer] = page;
-                refBits[pointer] = 1;
-                foundVictim = true;
-                pointer = (pointer + 1) % frameCount;
-              }
-            }
+        for (let j = 0; j < frameCount; j++) {
+          if (refBitHistory[j] < minValue) {
+            minValue = refBitHistory[j];
+            victimIndex = j;
           }
-        }
+        } // Replace the page with lowest reference history
+        step.replacedFrame = victimIndex;
+        frames[victimIndex] = page;
 
+        // Set highest bit for new page (according to canonical Aging algorithm)
+        refBitHistory[victimIndex] = 0x80; // 10000000 in binary
+        refBits[victimIndex] = 1; // MSB = 1
+
+        // Update pointer for visualization (point to the frame after the one we replaced)
+        pointer = (victimIndex + 1) % frameCount;
         step.pointerPositionAfter = pointer;
       }
     }
